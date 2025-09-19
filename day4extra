@@ -1,0 +1,800 @@
+import java.util.*;
+import java.io.*;
+import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
+import java.util.regex.*;
+
+/*
+  LibraryApp.java
+  Beginner-friendly Java implementation of an advanced library system.
+
+  - Single file for simplicity (good for beginner exercises).
+  - Implements Borrowable interface with default method.
+  - Book and DVD implement Borrowable.
+  - Search, filter, sorting (returns sorted copies).
+  - Simple JSON save/load (for learning; not a production-grade parser).
+  - Interactive console menu and very small self-tests.
+*/
+
+// ----------------------
+// Task 5: Borrowable interface
+// ----------------------
+interface Borrowable {
+    // Borrow the item: provide borrower's name and due date (simple string).
+    // Returns true if borrow succeeded, false if item already borrowed.
+    boolean borrow(String borrowerName, String dueDate);
+
+    // Return the item. Returns true if return succeeded, false if it was not borrowed.
+    boolean returnItem();
+
+    // Query methods
+    boolean isBorrowed();
+    String getBorrowerName();
+    String getDueDate();
+
+    // default method: small helper (Java 8+)
+    default String borrowHelp() {
+        return "Use borrow(name, dueDate) and returnItem() to manage borrow state.";
+    }
+}
+
+// ----------------------
+// Base class: LibraryItem
+// ----------------------
+abstract class LibraryItem {
+    protected int id; // unique id assigned by Library
+    protected String title;
+    protected String author;
+    protected int year;
+    protected String type; // e.g., "Book", "Magazine", "DVD"
+
+    // constructor (id is set to 0 here; Library will assign id)
+    public LibraryItem(String title, String author, int year, String type) {
+        this.id = 0;
+        this.title = title;
+        this.author = author;
+        this.year = year;
+        this.type = type;
+    }
+
+    // setter for id (used by Library when adding)
+    public void setId(int id) { this.id = id; }
+    public int getId() { return id; }
+    public String getTitle() { return title; }
+    public String getAuthor() { return author; }
+    public int getYear() { return year; }
+    public String getType() { return type; }
+
+    // common string summary
+    public String getDetails() {
+        return String.format("[%d] %s - %s (%d) <%s>", id, title, author, year, type);
+    }
+
+    // to be implemented by subclasses to include extra fields and borrow status
+    public abstract String toJson();
+}
+
+// ----------------------
+// Book class (borrowable)
+// ----------------------
+class Book extends LibraryItem implements Borrowable {
+    private String isbn;
+    private boolean borrowed;
+    private String borrowerName;
+    private String dueDate;
+
+    public Book(String title, String author, int year, String isbn) {
+        super(title, author, year, "Book");
+        this.isbn = isbn;
+        this.borrowed = false;
+        this.borrowerName = null;
+        this.dueDate = null;
+    }
+
+    // Borrowable implementation
+    @Override
+    public boolean borrow(String borrowerName, String dueDate) {
+        if (borrowed) return false;
+        this.borrowed = true;
+        this.borrowerName = borrowerName;
+        this.dueDate = dueDate;
+        return true;
+    }
+
+    @Override
+    public boolean returnItem() {
+        if (!borrowed) return false;
+        this.borrowed = false;
+        this.borrowerName = null;
+        this.dueDate = null;
+        return true;
+    }
+
+    @Override
+    public boolean isBorrowed() { return borrowed; }
+    @Override
+    public String getBorrowerName() { return borrowerName; }
+    @Override
+    public String getDueDate() { return dueDate; }
+
+    // helper used during loading to restore borrow state
+    public void setBorrowState(boolean borrowed, String borrowerName, String dueDate) {
+        this.borrowed = borrowed;
+        this.borrowerName = borrowerName;
+        this.dueDate = dueDate;
+    }
+
+    @Override
+    public String getDetails() {
+        String base = super.getDetails();
+        String extra = String.format(" ISBN:%s", isbn == null ? "-" : isbn);
+        if (borrowed) extra += String.format(" [BORROWED by %s until %s]", borrowerName, dueDate);
+        return base + extra;
+    }
+
+    // simple JSON serialization (not escaping special characters)
+    @Override
+    public String toJson() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"id\":").append(id).append(",");
+        sb.append("\"type\":\"").append(type).append("\",");
+        sb.append("\"title\":\"").append(escape(title)).append("\",");
+        sb.append("\"author\":\"").append(escape(author)).append("\",");
+        sb.append("\"year\":").append(year).append(",");
+        sb.append("\"isbn\":\"").append(escape(isbn)).append("\",");
+        sb.append("\"borrowed\":").append(borrowed).append(",");
+        sb.append("\"borrower\":").append(borrowerName==null?"null":"\""+escape(borrowerName)+"\"").append(",");
+        sb.append("\"dueDate\":").append(dueDate==null?"null":"\""+escape(dueDate)+"\"");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String escape(String s) {
+        if (s == null) return "";
+        return s.replace("\"", "\\\"");
+    }
+}
+
+// ----------------------
+// DVD class (borrowable)
+// ----------------------
+class DVD extends LibraryItem implements Borrowable {
+    private String director;
+    private boolean borrowed;
+    private String borrowerName;
+    private String dueDate;
+
+    public DVD(String title, String director, int year) {
+        super(title, director, year, "DVD");
+        this.director = director;
+        this.borrowed = false;
+        this.borrowerName = null;
+        this.dueDate = null;
+    }
+
+    @Override
+    public boolean borrow(String borrowerName, String dueDate) {
+        if (borrowed) return false;
+        this.borrowed = true;
+        this.borrowerName = borrowerName;
+        this.dueDate = dueDate;
+        return true;
+    }
+
+    @Override
+    public boolean returnItem() {
+        if (!borrowed) return false;
+        this.borrowed = false;
+        this.borrowerName = null;
+        this.dueDate = null;
+        return true;
+    }
+
+    @Override
+    public boolean isBorrowed() { return borrowed; }
+    @Override
+    public String getBorrowerName() { return borrowerName; }
+    @Override
+    public String getDueDate() { return dueDate; }
+
+    // helper for loading
+    public void setBorrowState(boolean borrowed, String borrowerName, String dueDate) {
+        this.borrowed = borrowed;
+        this.borrowerName = borrowerName;
+        this.dueDate = dueDate;
+    }
+
+    @Override
+    public String getDetails() {
+        String base = super.getDetails();
+        String extra = String.format(" Director:%s", director == null ? "-" : director);
+        if (borrowed) extra += String.format(" [BORROWED by %s until %s]", borrowerName, dueDate);
+        return base + extra;
+    }
+
+    @Override
+    public String toJson() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"id\":").append(id).append(",");
+        sb.append("\"type\":\"").append(type).append("\",");
+        sb.append("\"title\":\"").append(escape(title)).append("\",");
+        sb.append("\"author\":\"").append(escape(author)).append("\","); // author field stores director for DVD
+        sb.append("\"year\":").append(year).append(",");
+        sb.append("\"director\":\"").append(escape(director)).append("\",");
+        sb.append("\"borrowed\":").append(borrowed).append(",");
+        sb.append("\"borrower\":").append(borrowerName==null?"null":"\""+escape(borrowerName)+"\"").append(",");
+        sb.append("\"dueDate\":").append(dueDate==null?"null":"\""+escape(dueDate)+"\"");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String escape(String s) {
+        if (s == null) return "";
+        return s.replace("\"", "\\\"");
+    }
+}
+
+// ----------------------
+// Magazine class (not borrowable in this example)
+// ----------------------
+class Magazine extends LibraryItem {
+    private int issue;
+
+    public Magazine(String title, String author, int year, int issue) {
+        super(title, author, year, "Magazine");
+        this.issue = issue;
+    }
+
+    @Override
+    public String getDetails() {
+        return super.getDetails() + String.format(" Issue:%d", issue);
+    }
+
+    @Override
+    public String toJson() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        sb.append("\"id\":").append(id).append(",");
+        sb.append("\"type\":\"").append(type).append("\",");
+        sb.append("\"title\":\"").append(escape(title)).append("\",");
+        sb.append("\"author\":\"").append(escape(author)).append("\",");
+        sb.append("\"year\":").append(year).append(",");
+        sb.append("\"issue\":").append(issue).append(",");
+        sb.append("\"borrowed\":false,");
+        sb.append("\"borrower\":null,");
+        sb.append("\"dueDate\":null");
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String escape(String s) {
+        if (s == null) return "";
+        return s.replace("\"", "\\\"");
+    }
+}
+
+// ----------------------
+// Library: manages collection and provides search/filter/sort
+// ----------------------
+class Library {
+    private List<LibraryItem> items;
+    private int nextId;
+
+    public Library() {
+        items = new ArrayList<>();
+        nextId = 1;
+    }
+
+    // Add item and assign an id automatically
+    public void addItem(LibraryItem item) {
+        item.setId(nextId++);
+        items.add(item);
+    }
+
+    public boolean removeItem(int id) {
+        Iterator<LibraryItem> it = items.iterator();
+        while (it.hasNext()) {
+            if (it.next().getId() == id) {
+                it.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public LibraryItem getItemById(int id) {
+        for (LibraryItem it : items) {
+            if (it.getId() == id) return it;
+        }
+        return null;
+    }
+
+    public List<LibraryItem> listAllItems() {
+        return new ArrayList<>(items); // return copy for safety
+    }
+
+    // Task 6: Search and filter (case-insensitive, partial matches)
+    public List<LibraryItem> searchByTitle(String query) {
+        String q = query.toLowerCase();
+        List<LibraryItem> result = new ArrayList<>();
+        for (LibraryItem it : items) {
+            if (it.getTitle().toLowerCase().contains(q)) result.add(it);
+        }
+        return result;
+    }
+
+    public List<LibraryItem> searchByAuthor(String query) {
+        String q = query.toLowerCase();
+        List<LibraryItem> result = new ArrayList<>();
+        for (LibraryItem it : items) {
+            if (it.getAuthor()!=null && it.getAuthor().toLowerCase().contains(q)) result.add(it);
+        }
+        return result;
+    }
+
+    public List<LibraryItem> filterByYearRange(int from, int to) {
+        List<LibraryItem> result = new ArrayList<>();
+        for (LibraryItem it : items) {
+            if (it.getYear() >= from && it.getYear() <= to) result.add(it);
+        }
+        return result;
+    }
+
+    public List<LibraryItem> filterByType(String type) {
+        String t = type.toLowerCase();
+        List<LibraryItem> result = new ArrayList<>();
+        for (LibraryItem it : items) {
+            if (it.getType().toLowerCase().equals(t)) result.add(it);
+        }
+        return result;
+    }
+
+    // Task 7: Sorting (returns sorted copies; does not change original list)
+    public List<LibraryItem> sortByTitle(boolean ascending) {
+        List<LibraryItem> copy = new ArrayList<>(items);
+        Collections.sort(copy, new Comparator<LibraryItem>() {
+            public int compare(LibraryItem a, LibraryItem b) {
+                return a.getTitle().compareToIgnoreCase(b.getTitle());
+            }
+        });
+        if (!ascending) Collections.reverse(copy);
+        return copy;
+    }
+
+    public List<LibraryItem> sortByYear(boolean ascending) {
+        List<LibraryItem> copy = new ArrayList<>(items);
+        Collections.sort(copy, new Comparator<LibraryItem>() {
+            public int compare(LibraryItem a, LibraryItem b) {
+                return Integer.compare(a.getYear(), b.getYear());
+            }
+        });
+        if (!ascending) Collections.reverse(copy);
+        return copy;
+    }
+
+    public List<LibraryItem> sortByAuthor(boolean ascending) {
+        List<LibraryItem> copy = new ArrayList<>(items);
+        Collections.sort(copy, new Comparator<LibraryItem>() {
+            public int compare(LibraryItem a, LibraryItem b) {
+                String aa = a.getAuthor()==null ? "" : a.getAuthor();
+                String bb = b.getAuthor()==null ? "" : b.getAuthor();
+                return aa.compareToIgnoreCase(bb);
+            }
+        });
+        if (!ascending) Collections.reverse(copy);
+        return copy;
+    }
+
+    // ----------------------
+    // Task 8: Persistence (basic JSON save/load)
+    // ----------------------
+
+    // Save to a JSON file (simple format). Not production-grade but good for learning.
+    public boolean saveToFile(String filename) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"library\":[");
+        for (int i = 0; i < items.size(); i++) {
+            sb.append(items.get(i).toJson());
+            if (i < items.size()-1) sb.append(",");
+        }
+        sb.append("]}");
+        try {
+            Files.write(Paths.get(filename), sb.toString().getBytes(StandardCharsets.UTF_8));
+            return true;
+        } catch (IOException e) {
+            System.out.println("Error saving file: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // Load from a JSON file we created above. This is a tolerant parser expecting the same format.
+    public boolean loadFromFile(String filename) {
+        try {
+            String content = new String(Files.readAllBytes(Paths.get(filename)), StandardCharsets.UTF_8);
+            Pattern arrayPattern = Pattern.compile("\"library\"\\s*:\\s*\\[(.*)\\]", Pattern.DOTALL);
+            Matcher ma = arrayPattern.matcher(content);
+            if (!ma.find()) {
+                System.out.println("File format not recognized (no library array).");
+                return false;
+            }
+            String arrayContent = ma.group(1);
+            Pattern objPattern = Pattern.compile("\\{(.*?)\\}", Pattern.DOTALL);
+            Matcher mo = objPattern.matcher(arrayContent);
+
+            List<LibraryItem> loaded = new ArrayList<>();
+            int maxId = 0;
+            while (mo.find()) {
+                String obj = mo.group(1); // inside braces
+                String type = parseStringField(obj, "type");
+                int id = parseIntField(obj, "id", 0);
+                String title = parseStringField(obj, "title");
+                String author = parseStringField(obj, "author");
+                int year = parseIntField(obj, "year", 0);
+                boolean borrowed = parseBooleanField(obj, "borrowed", false);
+                String borrower = parseStringField(obj, "borrower");
+                if (borrower != null && borrower.equals("null")) borrower = null;
+                String dueDate = parseStringField(obj, "dueDate");
+                if (dueDate != null && dueDate.equals("null")) dueDate = null;
+
+                if ("Book".equalsIgnoreCase(type)) {
+                    String isbn = parseStringField(obj, "isbn");
+                    Book b = new Book(title, author, year, isbn);
+                    b.setId(id);
+                    b.setBorrowState(borrowed, borrower, dueDate);
+                    loaded.add(b);
+                } else if ("DVD".equalsIgnoreCase(type)) {
+                    String director = parseStringField(obj, "director");
+                    DVD d = new DVD(title, director, year);
+                    d.setId(id);
+                    d.setBorrowState(borrowed, borrower, dueDate);
+                    loaded.add(d);
+                } else if ("Magazine".equalsIgnoreCase(type)) {
+                    int issue = parseIntField(obj, "issue", 0);
+                    Magazine mItem = new Magazine(title, author, year, issue);
+                    mItem.setId(id);
+                    loaded.add(mItem);
+                } else {
+                    // unknown type -> skip or create as plain LibraryItem (not implemented)
+                    System.out.println("Unknown item type in file: " + type + " (skipping)");
+                }
+                if (id > maxId) maxId = id;
+            }
+
+            // replace current items with loaded ones
+            this.items = loaded;
+            this.nextId = maxId + 1;
+            return true;
+        } catch (IOException e) {
+            System.out.println("Error loading file: " + e.getMessage());
+            return false;
+        }
+    }
+
+    // small parsing helpers for the simple JSON we write
+    private static String parseStringField(String obj, String field) {
+        Pattern p = Pattern.compile("\"" + field + "\"\\s*:\\s*(\"(.*?)\"|null)", Pattern.DOTALL);
+        Matcher m = p.matcher(obj);
+        if (m.find()) {
+            String g = m.group(1);
+            if (g.equals("null")) return null;
+            String inner = m.group(2);
+            return inner == null ? "" : inner;
+        }
+        return null;
+    }
+
+    private static int parseIntField(String obj, String field, int defaultVal) {
+        Pattern p = Pattern.compile("\"" + field + "\"\\s*:\\s*(\\d+)", Pattern.DOTALL);
+        Matcher m = p.matcher(obj);
+        if (m.find()) {
+            try { return Integer.parseInt(m.group(1)); } catch (Exception e) {}
+        }
+        return defaultVal;
+    }
+
+    private static boolean parseBooleanField(String obj, String field, boolean defaultVal) {
+        Pattern p = Pattern.compile("\"" + field + "\"\\s*:\\s*(true|false)", Pattern.DOTALL);
+        Matcher m = p.matcher(obj);
+        if (m.find()) {
+            return Boolean.parseBoolean(m.group(1));
+        }
+        return defaultVal;
+    }
+}
+
+// ----------------------
+// Main app: menu and small tests
+// ----------------------
+public class LibraryApp {
+    private static Library library = new Library();
+    private static Scanner scanner = new Scanner(System.in);
+
+    public static void main(String[] args) {
+        // add some sample items so the menu is not empty
+        library.addItem(new Book("Clean Code", "Robert C. Martin", 2008, "9780132350884"));
+        library.addItem(new DVD("The Matrix", "Wachowski", 1999));
+        library.addItem(new Magazine("Science Monthly", "Various", 2023, 5));
+
+        // run a few simple automated tests for learning (prints results)
+        runBasicTests();
+
+        // interactive menu
+        boolean running = true;
+        while (running) {
+            printMenu();
+            String choice = scanner.nextLine().trim();
+            switch (choice) {
+                case "1": doAddItem(); break;
+                case "2": doRemoveItem(); break;
+                case "3": doListAllItems(); break;
+                case "4": doSearch(); break;
+                case "5": doFilter(); break;
+                case "6": doSort(); break;
+                case "7": doBorrowReturn(); break;
+                case "8": doSave(); break;
+                case "9": doLoad(); break;
+                case "0": running = false; System.out.println("Goodbye!"); break;
+                default:
+                    System.out.println("Invalid choice, please enter 0-9.");
+            }
+        }
+    }
+
+    // Menu printing
+    private static void printMenu() {
+        System.out.println("\n=== Library Management System ===");
+        System.out.println("1. Add item");
+        System.out.println("2. Remove item");
+        System.out.println("3. List all items");
+        System.out.println("4. Search by title/author");
+        System.out.println("5. Filter by year/type");
+        System.out.println("6. Sort items");
+        System.out.println("7. Borrow/Return item");
+        System.out.println("8. Save library to file");
+        System.out.println("9. Load library from file");
+        System.out.println("0. Exit");
+        System.out.print("Please enter your choice (0-9): ");
+    }
+
+    // Menu actions
+    private static void doAddItem() {
+        System.out.print("Type (book/magazine/dvd): ");
+        String type = scanner.nextLine().trim().toLowerCase();
+        System.out.print("Title: ");
+        String title = scanner.nextLine().trim();
+        System.out.print("Author (or director for DVD): ");
+        String author = scanner.nextLine().trim();
+        int year = readInt("Year: ", 1900, 2100);
+
+        if (type.equals("book")) {
+            System.out.print("ISBN: ");
+            String isbn = scanner.nextLine().trim();
+            library.addItem(new Book(title, author, year, isbn));
+            System.out.println("Book added.");
+        } else if (type.equals("dvd")) {
+            library.addItem(new DVD(title, author, year));
+            System.out.println("DVD added.");
+        } else if (type.equals("magazine")) {
+            int issue = readInt("Issue number: ", 1, 10000);
+            library.addItem(new Magazine(title, author, year, issue));
+            System.out.println("Magazine added.");
+        } else {
+            System.out.println("Unknown type. Item not added.");
+        }
+    }
+
+    private static void doRemoveItem() {
+        int id = readInt("Enter item id to remove: ", 1, Integer.MAX_VALUE);
+        boolean ok = library.removeItem(id);
+        System.out.println(ok ? "Item removed." : "Item not found.");
+    }
+
+    private static void doListAllItems() {
+        List<LibraryItem> all = library.listAllItems();
+        if (all.isEmpty()) {
+            System.out.println("Library is empty.");
+            return;
+        }
+        for (LibraryItem it : all) {
+            System.out.println(it.getDetails());
+        }
+    }
+
+    private static void doSearch() {
+        System.out.print("Search by (title/author): ");
+        String which = scanner.nextLine().trim().toLowerCase();
+        System.out.print("Query: ");
+        String q = scanner.nextLine().trim();
+        List<LibraryItem> res = which.equals("author") ? library.searchByAuthor(q) : library.searchByTitle(q);
+        if (res.isEmpty()) System.out.println("No results.");
+        else for (LibraryItem it : res) System.out.println(it.getDetails());
+    }
+
+    private static void doFilter() {
+        System.out.print("Filter by (year/type): ");
+        String which = scanner.nextLine().trim().toLowerCase();
+        if (which.equals("year")) {
+            int from = readInt("From year: ", 0, 9999);
+            int to = readInt("To year: ", from, 9999);
+            List<LibraryItem> res = library.filterByYearRange(from, to);
+            if (res.isEmpty()) System.out.println("No results.");
+            else for (LibraryItem it : res) System.out.println(it.getDetails());
+        } else {
+            System.out.print("Type (Book/Magazine/DVD): ");
+            String type = scanner.nextLine().trim();
+            List<LibraryItem> res = library.filterByType(type);
+            if (res.isEmpty()) System.out.println("No results.");
+            else for (LibraryItem it : res) System.out.println(it.getDetails());
+        }
+    }
+
+    private static void doSort() {
+        System.out.print("Sort by (title/year/author): ");
+        String key = scanner.nextLine().trim().toLowerCase();
+        boolean asc = true;
+        System.out.print("Ascending? (y/n): ");
+        String a = scanner.nextLine().trim().toLowerCase();
+        asc = a.equals("y") || a.equals("yes") || a.isEmpty();
+
+        List<LibraryItem> sorted;
+        if (key.equals("year")) sorted = library.sortByYear(asc);
+        else if (key.equals("author")) sorted = library.sortByAuthor(asc);
+        else sorted = library.sortByTitle(asc);
+
+        for (LibraryItem it : sorted) System.out.println(it.getDetails());
+    }
+
+    private static void doBorrowReturn() {
+        System.out.print("Action (borrow/return): ");
+        String act = scanner.nextLine().trim().toLowerCase();
+        int id = readInt("Item id: ", 1, Integer.MAX_VALUE);
+        LibraryItem item = library.getItemById(id);
+        if (item == null) { System.out.println("Item not found."); return; }
+
+        if (act.equals("borrow")) {
+            if (!(item instanceof Borrowable)) {
+                System.out.println("This item cannot be borrowed.");
+                return;
+            }
+            Borrowable b = (Borrowable) item;
+            System.out.print("Borrower name: ");
+            String name = scanner.nextLine().trim();
+            System.out.print("Due date (e.g. 2025-10-01): ");
+            String due = scanner.nextLine().trim();
+            boolean ok = b.borrow(name, due);
+            System.out.println(ok ? "Borrowed successfully." : "Item is already borrowed.");
+        } else if (act.equals("return")) {
+            if (!(item instanceof Borrowable)) {
+                System.out.println("This item cannot be returned (it is not borrowable).");
+                return;
+            }
+            Borrowable b = (Borrowable) item;
+            boolean ok = b.returnItem();
+            System.out.println(ok ? "Returned successfully." : "Item was not borrowed.");
+        } else {
+            System.out.println("Unknown action.");
+        }
+    }
+
+    private static void doSave() {
+        System.out.print("Filename to save (e.g. library.json): ");
+        String fn = scanner.nextLine().trim();
+        boolean ok = library.saveToFile(fn);
+        System.out.println(ok ? "Saved." : "Save failed.");
+    }
+
+    private static void doLoad() {
+        System.out.print("Filename to load (e.g. library.json): ");
+        String fn = scanner.nextLine().trim();
+        boolean ok = library.loadFromFile(fn);
+        System.out.println(ok ? "Loaded." : "Load failed.");
+    }
+
+    private static int readInt(String prompt, int min, int max) {
+        while (true) {
+            System.out.print(prompt);
+            String line = scanner.nextLine().trim();
+            try {
+                int v = Integer.parseInt(line);
+                if (v < min || v > max) {
+                    System.out.printf("Please enter a number between %d and %d.\n", min, max);
+                    continue;
+                }
+                return v;
+            } catch (NumberFormatException e) {
+                System.out.println("Please enter a valid integer.");
+            }
+        }
+    }
+
+    // ----------------------
+    // Task 10: Basic Automated Tests (very simple, prints pass/fail)
+    // ----------------------
+    private static void runBasicTests() {
+        System.out.println("\n--- Running basic tests (beginner style) ---");
+        testItemCreation();
+        testSearchAndFilter();
+        testBorrowingSystem();
+        testSorting();
+        testPersistence();
+        System.out.println("--- Tests finished ---\n");
+    }
+
+    private static void assertTrue(boolean cond, String testName) {
+        if (cond) System.out.println("[PASS] " + testName);
+        else System.out.println("[FAIL] " + testName);
+    }
+
+    private static void testItemCreation() {
+        Library tlib = new Library();
+        tlib.addItem(new Book("A", "AuthorA", 2000, "ISBN-A"));
+        tlib.addItem(new DVD("D", "Dir", 2010));
+        tlib.addItem(new Magazine("M", "AuthM", 2020, 1));
+        assertTrue(tlib.listAllItems().size() == 3, "Item creation and listing");
+    }
+
+    private static void testSearchAndFilter() {
+        Library tlib = new Library();
+        tlib.addItem(new Book("Java Programming", "Alice", 2015, "111"));
+        tlib.addItem(new Book("Advanced Java", "Bob", 2018, "222"));
+        tlib.addItem(new DVD("Java: The Movie", "Director", 2019));
+        List<LibraryItem> r1 = tlib.searchByTitle("java");
+        assertTrue(r1.size() == 3, "Search by title partial & case-insensitive");
+        List<LibraryItem> r2 = tlib.searchByAuthor("alice");
+        assertTrue(r2.size() == 1 && r2.get(0).getAuthor().equals("Alice"), "Search by author");
+        List<LibraryItem> r3 = tlib.filterByYearRange(2016, 2020);
+        assertTrue(r3.size() == 2, "Filter by year range");
+    }
+
+    private static void testBorrowingSystem() {
+        Library tlib = new Library();
+        Book b = new Book("Borrow Me", "Someone", 2020, "999");
+        tlib.addItem(b);
+        boolean ok1 = b.borrow("Student", "2025-10-01");
+        boolean ok2 = b.borrow("Other", "2025-11-01");
+        boolean ok3 = b.returnItem();
+        boolean ok4 = b.returnItem();
+        assertTrue(ok1 && !ok2 && ok3 && !ok4, "Borrow/return logic");
+    }
+
+    private static void testSorting() {
+        Library tlib = new Library();
+        tlib.addItem(new Book("C Title", "Charlie", 2001, "c"));
+        tlib.addItem(new Book("A Title", "Alice", 2003, "a"));
+        tlib.addItem(new Book("B Title", "Bob", 1999, "b"));
+        List<LibraryItem> sortedByTitle = tlib.sortByTitle(true);
+        assertTrue(sortedByTitle.get(0).getTitle().startsWith("A "), "Sort by title ascending");
+        List<LibraryItem> sortedByYearDesc = tlib.sortByYear(false);
+        assertTrue(sortedByYearDesc.get(0).getYear() == 2003, "Sort by year descending");
+    }
+
+    private static void testPersistence() {
+        try {
+            String tmp = "tmp_test_library.json";
+            Library tlib = new Library();
+            Book b = new Book("Saved Book", "Saver", 2021, "X1");
+            b.borrow("SaverName", "2025-10-10");
+            tlib.addItem(b);
+            tlib.addItem(new DVD("Saved DVD", "Dir", 2010));
+            boolean saved = tlib.saveToFile(tmp);
+            Library loaded = new Library();
+            boolean loadedOk = loaded.loadFromFile(tmp);
+            List<LibraryItem> items = loaded.listAllItems();
+            boolean foundBorrowed = false;
+            for (LibraryItem it : items) {
+                if (it instanceof Book && it.getTitle().equals("Saved Book")) {
+                    Book bb = (Book) it;
+                    if (bb.isBorrowed() && "SaverName".equals(bb.getBorrowerName())) foundBorrowed = true;
+                }
+            }
+            // cleanup
+            Files.deleteIfExists(Paths.get(tmp));
+            assertTrue(saved && loadedOk && items.size() == 2 && foundBorrowed, "Persistence save/load and borrow restore");
+        } catch (Exception e) {
+            System.out.println("Persistence test exception: " + e.getMessage());
+            assertTrue(false, "Persistence save/load");
+        }
+    }
+}
